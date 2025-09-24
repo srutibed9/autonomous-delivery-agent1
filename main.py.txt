@@ -1,0 +1,275 @@
+# =============================================================================
+# Project: Autonomous Delivery Agent
+# Course: <Fundamentals of AI and ML>
+#
+# Name: <Shivakrishna Dash>
+# Registration Number: <24BAS10039>
+# Date: <24-09-25>
+# =============================================================================
+import heapq
+import time
+import copy
+
+# --- Helper functions and data structures ---
+class PriorityQueue:
+    def __init__(self):
+        self.elements = []
+    
+    def empty(self):
+        return len(self.elements) == 0
+    
+    def put(self, item, priority):
+        heapq.heappush(self.elements, (priority, item))
+    
+    def get(self):
+        return heapq.heappop(self.elements)[1]
+
+class Agent:
+    def __init__(self, grid):
+        self.grid = grid
+        self.rows = len(grid)
+        self.cols = len(grid[0])
+
+    def get_neighbors(self, node):
+        """Returns the valid neighbors of a given node (up, down, left, right)."""
+        row, col = node
+        neighbors = []
+        # Possible movements: up, down, left, right
+        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        for dr, dc in directions:
+            new_row, new_col = row + dr, col + dc
+            
+            # Check if the new position is within the grid boundaries
+            if 0 <= new_row < self.rows and 0 <= new_col < self.cols:
+                # Check if the new position is not an obstacle (cost is not 999)
+                if self.grid[new_row][new_col] != 999:
+                    neighbors.append((new_row, new_col))
+        return neighbors
+
+    def uniform_cost_search(self, start, goal):
+        """
+        Finds the lowest cost path from start to goal using Uniform-Cost Search.
+        """
+        frontier = PriorityQueue()
+        frontier.put(start, 0)
+        came_from = {start: None}
+        cost_so_far = {start: 0}
+
+        while not frontier.empty():
+            current = frontier.get()
+
+            if current == goal:
+                break
+            
+            for next_node in self.get_neighbors(current):
+                new_cost = cost_so_far[current] + self.grid[next_node[0]][next_node[1]]
+                if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
+                    cost_so_far[next_node] = new_cost
+                    priority = new_cost
+                    frontier.put(next_node, priority)
+                    came_from[next_node] = current
+        
+        return came_from, cost_so_far
+        
+    def heuristic(self, a, b):
+        """
+        A heuristic function that estimates the cost from node a to node b.
+        We'll use the Manhattan distance, which is the sum of the
+        horizontal and vertical distances between two points.
+        """
+        (x1, y1) = a
+        (x2, y2) = b
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def a_star_search(self, start, goal):
+        """
+        Finds the lowest cost path from start to goal using A* Search.
+        """
+        frontier = PriorityQueue()
+        frontier.put(start, 0)
+        came_from = {start: None}
+        cost_so_far = {start: 0}
+
+        while not frontier.empty():
+            current = frontier.get()
+            
+            if current == goal:
+                break
+            
+            for next_node in self.get_neighbors(current):
+                new_cost = cost_so_far[current] + self.grid[next_node[0]][next_node[1]]
+                if next_node not in cost_so_far or new_cost < cost_so_far[next_node]:
+                    cost_so_far[next_node] = new_cost
+                    priority = new_cost + self.heuristic(goal, next_node)
+                    frontier.put(next_node, priority)
+                    came_from[next_node] = current
+        
+        return came_from, cost_so_far
+
+    def reconstruct_path(self, came_from, start, goal):
+        """Reconstructs the path from the came_from dictionary."""
+        current = goal
+        path = []
+        while current != start:
+            if current not in came_from:
+                # Path not found
+                return None
+            path.append(current)
+            current = came_from[current]
+        path.append(start) # Add start node
+        path.reverse() # Reverse the path to show from start to goal
+        return path
+
+class DynamicAgent(Agent):
+    def __init__(self, grid):
+        super().__init__(grid)
+
+    def simulate_delivery(self, start, goal, dynamic_obstacles_list):
+        current_position = start
+        path_found = []
+        path_cost = 0
+        step = 0
+        
+        # Initial plan
+        print(f"[{time.strftime('%H:%M:%S')}] Agent starts at {start}, planning initial path to {goal}.")
+        came_from, cost_so_far = self.a_star_search(current_position, goal)
+        path = self.reconstruct_path(came_from, current_position, goal)
+        
+        if not path:
+            print("No initial path found. Delivery failed.")
+            return
+
+        print(f"[{time.strftime('%H:%M:%S')}] Initial path planned with {len(path)} steps.")
+        
+        while current_position != goal:
+            step += 1
+            if len(path) > 1:
+                next_position = path[1]
+            else:
+                next_position = goal
+
+            print(f"[{time.strftime('%H:%M:%S')}] Step {step}: Moving from {current_position} to {next_position}.")
+            path_cost += self.grid[next_position[0]][next_position[1]]
+            path_found.append(next_position)
+
+            current_position = next_position
+
+            # Check for dynamic obstacles
+            obstacle_detected = False
+            for obs_step, obs_pos in dynamic_obstacles_list:
+                if step == obs_step and obs_pos == current_position:
+                    obstacle_detected = True
+                    # Set the obstacle on the grid
+                    print(f"[{time.strftime('%H:%M:%S')}] *** OBSTACLE DETECTED at {current_position}! ***")
+                    self.grid[current_position[0]][current_position[1]] = 999
+                    
+                    # Replanning from the current position
+                    print(f"[{time.strftime('%H:%M:%S')}] Re-planning path from {current_position} to {goal}.")
+                    came_from, cost_so_far = self.a_star_search(current_position, goal)
+                    path = self.reconstruct_path(came_from, current_position, goal)
+                    
+                    if not path:
+                        print(f"[{time.strftime('%H:%M:%S')}] No new path found! Agent is stuck.")
+                        return
+                    else:
+                        print(f"[{time.strftime('%H:%M:%S')}] New path planned with {len(path)} steps.")
+                    break
+            
+            # If no obstacle detected, just continue on the path
+            if not obstacle_detected and len(path) > 1:
+                path = path[1:] # Move to the next step of the current path
+
+        print(f"[{time.strftime('%H:%M:%S')}] Agent reached the goal at {goal}. Total path cost: {path_cost}.")
+
+
+def load_map(file_path):
+    """
+    Loads a map from a text file.
+    The first line should contain the dimensions (rows, cols).
+    Subsequent lines contain the movement costs for each cell.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            # Read the first line for dimensions
+            dimensions = file.readline().strip().split()
+            rows = int(dimensions[0])
+            cols = int(dimensions[1])
+
+            # Read the rest of the file to build the grid
+            grid = []
+            for _ in range(rows):
+                row_values = list(map(int, file.readline().strip().split()))
+                grid.append(row_values)
+
+            return grid, rows, cols
+    except FileNotFoundError:
+        print(f"Error: The file '{file_path}' was not found.")
+        return None, 0, 0
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None, 0, 0
+
+# --- Main Program to test all maps ---
+if __name__ == "__main__":
+    print("\n" + "="*20 + f" Running UCS and A* on all static maps " + "="*20)
+
+    # Test all static maps
+    test_maps = ["small_map.txt", "medium_map.txt", "large_map.txt"]
+
+    for map_file in test_maps:
+        print(f"\n" + "="*20 + f" Testing on {map_file} " + "="*20)
+        game_map, rows, cols = load_map(map_file)
+        
+        if not game_map:
+            continue
+
+        start_node = (0, 0)
+        goal_node = (rows - 1, cols - 1)
+        agent = Agent(game_map)
+
+        # Uniform-Cost Search (UCS)
+        print("--- Running Uniform-Cost Search ---")
+        start_time_ucs = time.time()
+        came_from_ucs, cost_so_far_ucs = agent.uniform_cost_search(start_node, goal_node)
+        end_time_ucs = time.time()
+        
+        if goal_node in cost_so_far_ucs:
+            path_ucs = agent.reconstruct_path(came_from_ucs, start_node, goal_node)
+            nodes_ucs = len(cost_so_far_ucs)
+            print(f"Path found! Cost: {cost_so_far_ucs[goal_node]}")
+            print(f"Nodes Expanded: {nodes_ucs}")
+            print(f"Time Taken: {end_time_ucs - start_time_ucs:.6f} seconds")
+        else:
+            print("No path found.")
+
+        print("\n" + "-"*40 + "\n")
+
+        # A* Search
+        print("--- Running A* Search ---")
+        start_time_a_star = time.time()
+        came_from_a_star, cost_so_far_a_star = agent.a_star_search(start_node, goal_node)
+        end_time_a_star = time.time()
+
+        if goal_node in cost_so_far_a_star:
+            path_a_star = agent.reconstruct_path(came_from_a_star, start_node, goal_node)
+            nodes_a_star = len(cost_so_far_a_star)
+            print(f"Path found! Cost: {cost_so_far_a_star[goal_node]}")
+            print(f"Nodes Expanded: {nodes_a_star}")
+            print(f"Time Taken: {end_time_a_star - start_time_a_star:.6f} seconds")
+        else:
+            print("No path found.")
+
+    print("\n" + "="*20 + f" Running Dynamic Replanning Test " + "="*20)
+    map_file = "dynamic_map.txt"
+    game_map, rows, cols = load_map(map_file)
+
+    if game_map:
+        # Define the dynamic obstacle: at step 4, an obstacle appears at (0, 4)
+        dynamic_obstacles = [(4, (0, 4))] 
+        dynamic_grid = copy.deepcopy(game_map)
+        dynamic_agent = DynamicAgent(dynamic_grid)
+        start_node = (0, 0)
+        goal_node = (9, 9)
+
+        print("--- Testing Dynamic Replanning ---")
+        dynamic_agent.simulate_delivery(start_node, goal_node, dynamic_obstacles)
